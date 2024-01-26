@@ -1,3 +1,10 @@
+*.csv
+*.txt 
+data/EdNet-KT1
+*.jpg
+PEBG-master/
+data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
