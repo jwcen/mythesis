@@ -16,11 +16,12 @@ from coo_matrix import co_acc_probs, co_acc_skills
 
 
 
-DATA_FOLDER = '/Users/jcen/mythesis/data/{}'
+DATA_FOLDER = 'E:\\Cenjw\\研究生\\mythesis\\data\\{}'
 
 def process(pool, dataset='assist09', encoding="ISO-8859-1"):
     data_folder = DATA_FOLDER.format(dataset)
-    df = pd.read_csv(f'{data_folder}/{dataset}.csv', low_memory=False, encoding=encoding)
+    filepath = os.path.join(data_folder, f'{dataset}.csv')
+    df = pd.read_csv(filepath, low_memory=False, encoding=encoding)
 
     if dataset == 'assist17':
         pass
@@ -54,7 +55,6 @@ def process(pool, dataset='assist09', encoding="ISO-8859-1"):
         df = df.assign(skill_id=df.skill_id.str.split('-')).explode('skill_id')
         df['original'] = 1
 
-
     # delete empty skill_id
     df = df.dropna(subset=['skill_id'])
     df = df[~df['skill_id'].isin(['noskill'])]
@@ -78,52 +78,62 @@ def process(pool, dataset='assist09', encoding="ISO-8859-1"):
 
     # 5,"[55969, 55970, ...
     skill_df = df[['skill_id', 'problem_id']].groupby(['skill_id'], as_index=True).apply(lambda r: np.array(list(set(r['problem_id'].values))))
-    joblib.dump(skill_df, f'{data_folder}/skill_prob.pkl.zip')
+    skill_df_path = os.path.join(data_folder, 'skill_prob.pkl.zip')
+    joblib.dump(skill_df, skill_df_path)
 
     user_prob = df[['user_id', 'problem_id', 'correct']].groupby(['user_id', 'problem_id'])['correct'].agg('mean')
 
-    processed_data = f'{data_folder}/processed_{dataset}.csv'
+    processed_data = os.path.join(data_folder, f'processed_{dataset}.csv')
     df.to_csv(processed_data, index=False)
     print(f'Saved processed data to {processed_data}\n')
 
     # 抽取特征矩阵
-    extract_feature_matrix(pool, df, skill_df, user_prob, data_folder)
+    extract_feature_matrix(df, dataset, data_folder)
 
     # 抽取练习、知识点影响子图
     extract_subgraph(pool, df, skill_df, user_prob, data_folder)
 
 
-def extract_feature_matrix(pool, df, skill_df, user_prob, data_folder):
-    problems = df['problem_id'].unique()
-    pro_id_dict = dict(zip(problems, range(len(problems))))
-    print('problem number %d' % len(problems))
-
-    pro_type = df['answer_type'].unique()
-    pro_type_dict = dict(zip(pro_type, range(len(pro_type))))
-    print('problem type: ', pro_type_dict)
-    pro_feat = []
-    for pro_id in range(len(problems)):
-        tmp_df = df[df['problem_id'] == problems[pro_id]]
-        tmp_df_0 = tmp_df.iloc[0]
-
-        # pro_feature: [ms_of_response, answer_type, mean_correct_num]
-        ms = tmp_df['ms_first_response'].abs().mean()
-        p = tmp_df['correct'].mean()
-        pro_type_id = pro_type_dict[tmp_df_0['answer_type']]
-        tmp_pro_feat = [0.] * (len(pro_type_dict) + 2)
-        tmp_pro_feat[0] = ms
-        tmp_pro_feat[pro_type_id + 1] = 1.
-        tmp_pro_feat[-1] = p
-        pro_feat.append(tmp_pro_feat)
+def extract_feature_matrix(df, dataset, data_folder):
     
-    pro_feat = np.array(pro_feat).astype(np.float32)
-    pro_feat[:, 0] = (pro_feat[:, 0] - np.min(pro_feat[:, 0])) / \
-        (np.max(pro_feat[:, 0]) - np.min(pro_feat[:, 0]))
-    
-    # save pro_feat_arr    import joblib
-    joblib.dump(pro_feat, './assist09_pro_feat.zip')
-    np.savez('./assist09_pro_feat.npz', pro_feat=pro_feat)
+    if dataset == 'assist09':
+        problems = df['problem_id'].unique()
+        pro_id_dict = dict(zip(problems, range(len(problems))))
+        print('problem number %d' % len(problems))
 
+        pro_type = df['answer_type'].unique()
+        pro_type_dict = dict(zip(pro_type, range(len(pro_type))))
+        print('problem type: ', pro_type_dict)
+        pro_feat = []
+        for pro_id in range(len(problems)):
+            tmp_df = df[df['problem_id'] == problems[pro_id]]
+            tmp_df_0 = tmp_df.iloc[0]
+
+            # pro_feature: [ms_of_response, answer_type, mean_correct_num]
+            ms = tmp_df['ms_first_response'].abs().mean()
+            p = tmp_df['correct'].mean()
+            pro_type_id = pro_type_dict[tmp_df_0['answer_type']]
+            tmp_pro_feat = [0.] * (len(pro_type_dict) + 2)
+            tmp_pro_feat[0] = ms
+            tmp_pro_feat[pro_type_id + 1] = 1.
+            tmp_pro_feat[-1] = p
+            pro_feat.append(tmp_pro_feat)
+        
+        pro_feat = np.array(pro_feat).astype(np.float32)
+        pro_feat[:, 0] = (pro_feat[:, 0] - np.min(pro_feat[:, 0])) / \
+            (np.max(pro_feat[:, 0]) - np.min(pro_feat[:, 0]))
+        
+        # save pro_feat_arr   
+        pro_feat_path = os.path.join(data_folder, 'pro_feat.zip')
+        joblib.dump(pro_feat, pro_feat_path)
+        print(f'saved {dataset} pro_feat')
+        # np.savez(f'{data_folder}/pro_feat.npz', pro_feat=pro_feat)
+
+    if dataset == 'ednet':
+        pass 
+
+    if dataset == 'matmat':
+        pass 
 
 def extract_subgraph(pool, df, skill_df, user_prob, data_folder):
     skill_acc = df[['skill_id', 'correct']].groupby('skill_id')['correct'].agg('mean')
@@ -149,7 +159,7 @@ def extract_subgraph(pool, df, skill_df, user_prob, data_folder):
             col.append(j)
     mat_skill = coo_matrix((val, (row, col)), shape=(len(skill_df.index), len(skill_df.index)))
 
-    joblib.dump(mat_skill, f'{data_folder}/c2c.pkl.zip')
+    joblib.dump(mat_skill, os.path.join(data_folder, 'c2c.pkl.zip'))
     print('processed c2c matrix\n')
 
     # e2e matrix
@@ -174,16 +184,17 @@ def extract_subgraph(pool, df, skill_df, user_prob, data_folder):
         mat = coo_matrix((val, (row, col)), shape=(len(skill_probs), len(skill_probs)))
         skill_mats.append(mat)
 
-    joblib.dump(skill_mats, f'{data_folder}/para_e2e.pkl.zip')
+    joblib.dump(skill_mats,os.path.join(data_folder, 'para_e2e.pkl.zip'))
     print('processed e2e matrix\n')
 
 
 if __name__ == '__main__':
-    cores = multiprocessing.cpu_count() - 5
+    cores = multiprocessing.cpu_count() - 2
     pool = multiprocessing.Pool(processes=cores)
 
+    dataset = 'assist09'
+    print(f'start processing dataset {dataset}...')
     start = time.time()
-    df, skill_df, user_prob = process(pool, dataset='ednet')
-    # df, skill_df, user_prob = process(pool, dataset='matmat')
+    process(pool, dataset=dataset)
     end = time.time()
     print(f'total processed time: {end-start} s')
