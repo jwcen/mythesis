@@ -1,4 +1,5 @@
-
+import sys
+print(sys.path)
 
 for epoch in (range(EPOCHS)):
     loss, acc, auc = train_fn(model, train_dataloader, optimizer, criterion, device)

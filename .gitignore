@@ -1,9 +1,7 @@
 *.csv
 *.txt 
-data/EdNet-KT1
-*.jpg
-PEBG-master/
 data/
+.vscode 
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
