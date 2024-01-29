@@ -14,9 +14,8 @@ sys.path.append("..")
 from coo_matrix import co_acc_probs, co_acc_skills
 
 
-
-
-DATA_FOLDER = 'E:\\Cenjw\\研究生\\mythesis\\data\\{}'
+DATA_FOLDER = '/Users/jcen/mythesis/data/{}'  # my macos
+# DATA_FOLDER = 'E:\\Cenjw\\研究生\\mythesis\\data\\{}'  # my windows
 
 def process(pool, dataset='assist09', encoding="ISO-8859-1"):
     data_folder = DATA_FOLDER.format(dataset)
