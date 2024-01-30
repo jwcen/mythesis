@@ -8,13 +8,11 @@ from scipy.sparse import coo_matrix
 from functools import partial
 import multiprocessing
 
-import sys
-sys.path.append("..")
-
 from coo_matrix import co_acc_probs, co_acc_skills
 
 
-DATA_FOLDER = '/Users/jcen/mythesis/data/{}'  # my macos
+DATA_FOLDER = '/home/cen_jianwei/code/AttGAE-KT/data/{}'  # school server
+# DATA_FOLDER = '/Users/jcen/mythesis/data/{}'  # my macos
 # DATA_FOLDER = 'E:\\Cenjw\\研究生\\mythesis\\data\\{}'  # my windows
 
 def process(pool, dataset='assist09', encoding="ISO-8859-1"):
@@ -23,8 +21,23 @@ def process(pool, dataset='assist09', encoding="ISO-8859-1"):
     df = pd.read_csv(filepath, low_memory=False, encoding=encoding)
 
     if dataset == 'assist17':
-        pass
-
+        cols = ['studentId', 'MiddleSchoolId', 
+            'AveKnow', 'AveCarelessness', 'AveCorrect', 'NumActions', 'AveResBored',
+            'AveResConf', 'AveResFrust', 'AveResOfftask',
+            'action_num', 'skill', 'problemId', 'problemType',
+            'assignmentId', 'assistmentId', 'startTime', 'endTime', 'timeTaken',
+            'correct', 'original', 'hint', 'hintCount', 'hintTotal', 'scaffold',
+                'attemptCount', 'frIsHelpRequest']
+        df = df[cols]
+        df = df.rename(columns={
+            'problemType': 'problem_type',
+            'problemId': 'problem_id',
+            'studentId': 'user_id'})
+        mapper = {}
+        for i, x in enumerate(df.skill.unique()):
+            mapper[x] = i + 1
+        df['skill_id'] = df['skill'].map(mapper)
+        
     if dataset == 'matmat':
         ## 预处理数据集
         # df_a = pd.read_csv(f'{data_folder}/answers.csv', low_memory=False, encoding="ISO-8859-1")
@@ -54,6 +67,7 @@ def process(pool, dataset='assist09', encoding="ISO-8859-1"):
         df = df.assign(skill_id=df.skill_id.str.split('-')).explode('skill_id')
         df['original'] = 1
 
+    # 默认处理09
     # delete empty skill_id
     df = df.dropna(subset=['skill_id'])
     df = df[~df['skill_id'].isin(['noskill'])]
@@ -90,7 +104,7 @@ def process(pool, dataset='assist09', encoding="ISO-8859-1"):
     extract_feature_matrix(df, dataset, data_folder)
 
     # 抽取练习、知识点影响子图
-    extract_subgraph(pool, df, skill_df, user_prob, data_folder)
+    # extract_subgraph(pool, df, skill_df, user_prob, data_folder)
 
 
 def extract_feature_matrix(df, dataset, data_folder):
@@ -125,41 +139,78 @@ def extract_feature_matrix(df, dataset, data_folder):
         # save pro_feat_arr   
         pro_feat_path = os.path.join(data_folder, 'pro_feat.zip')
         joblib.dump(pro_feat, pro_feat_path)
-        print(f'saved {dataset} pro_feat')
         # np.savez(f'{data_folder}/pro_feat.npz', pro_feat=pro_feat)
 
     if dataset == 'ednet':
-        pass 
+        df['correct'] = df['correct'].mean()
+        features_df = df[['correct', 'difficulty']]
+        # 将特征转换为numpy数组（向量化）
+        pro_feat = features_df.to_numpy()
+        
+        # save pro_feat_arr   
+        pro_feat_path = os.path.join(data_folder, 'pro_feat.zip')
+        joblib.dump(pro_feat, pro_feat_path)
 
-    if dataset == 'matmat':
-        pass 
+    if dataset == 'assist17':
+        problems = df['problem_id'].unique()
+        pro_id_dict = dict(zip(problems, range(len(problems))))
+        print('problem number %d' % len(problems))
+
+        pro_type = df['problem_type'].unique()
+        pro_type_dict = dict(zip(pro_type, range(len(pro_type))))
+        print('problem type: ', pro_type_dict)
+        pro_feat = []
+        for pro_id in range(len(problems)):
+            tmp_df = df[df['problem_id'] == problems[pro_id]]
+            tmp_df_0 = tmp_df.iloc[0]
+
+            # pro_feature: [ms_of_response, answer_type, mean_correct_num]
+            ms = tmp_df['timeTaken'].abs().mean()
+            p = tmp_df['correct'].mean()
+            pro_type_id = pro_type_dict[tmp_df_0['problem_type']]
+            tmp_pro_feat = [0.] * (len(pro_type_dict) + 2)
+            tmp_pro_feat[0] = ms
+            tmp_pro_feat[pro_type_id + 1] = 1.
+            tmp_pro_feat[-1] = p
+            pro_feat.append(tmp_pro_feat)
+        
+        pro_feat = np.array(pro_feat).astype(np.float32)
+        pro_feat[:, 0] = (pro_feat[:, 0] - np.min(pro_feat[:, 0])) / \
+            (np.max(pro_feat[:, 0]) - np.min(pro_feat[:, 0]))
+        
+        # save pro_feat_arr   
+        pro_feat_path = os.path.join(data_folder, 'pro_feat.zip')
+        joblib.dump(pro_feat, pro_feat_path)
+
+    print(f'saved {dataset} pro_feat') 
+
 
 def extract_subgraph(pool, df, skill_df, user_prob, data_folder):
     skill_acc = df[['skill_id', 'correct']].groupby('skill_id')['correct'].agg('mean')
     user_skill = df[['user_id', 'skill_id', 'correct']].groupby(['user_id', 'skill_id'])['correct'].agg('mean')
 
-    for user, skill in tqdm(user_skill.index):
-        if user_skill[user][skill]>=skill_acc[skill]:
-            user_skill[user][skill] = 1
-        else:
-            user_skill[user][skill] = 0
+    # for user, skill in tqdm(user_skill.index):
+    #     if user_skill[user][skill]>=skill_acc[skill]:
+    #         user_skill[user][skill] = 1
+    #     else:
+    #         user_skill[user][skill] = 0
 
-    # c2c matrix
-    row = []
-    col = []
-    val = []
-    print('Extracting c2c matrix...')
-    arg_skills = ((skill1, skill2) for (i, skill1) in enumerate(skill_df.index) for skill2 in skill_df.index[i:])
-    c2c = partial(co_acc_skills, user_skill)
-    val = pool.starmap(c2c, arg_skills)
-    for i in range(len(skill_df.index)):
-        for j in range(i, len(skill_df.index)):
-            row.append(i)
-            col.append(j)
-    mat_skill = coo_matrix((val, (row, col)), shape=(len(skill_df.index), len(skill_df.index)))
+    # # c2c matrix
+    # row = []
+    # col = []
+    # val = []
+    # print('Extracting c2c matrix...')
+    # arg_skills = ((skill1, skill2) for (i, skill1) in enumerate(skill_df.index) for skill2 in skill_df.index[i:])
+    # c2c = partial(co_acc_skills, user_skill)
+    # val = pool.starmap(c2c, arg_skills)
+    # for i in range(len(skill_df.index)):
+    #     for j in range(i, len(skill_df.index)):
+    #         row.append(i)
+    #         col.append(j)
+    # mat_skill = coo_matrix((val, (row, col)), shape=(len(skill_df.index), len(skill_df.index)))
 
-    joblib.dump(mat_skill, os.path.join(data_folder, 'c2c.pkl.zip'))
-    print('processed c2c matrix\n')
+    # joblib.dump(mat_skill, os.path.join(data_folder, 'c2c.pkl.zip'))
+    # print('processed c2c matrix\n')
 
     # e2e matrix
     print('Extracting e2e matrix...')
@@ -191,7 +242,8 @@ if __name__ == '__main__':
     cores = multiprocessing.cpu_count() - 2
     pool = multiprocessing.Pool(processes=cores)
 
-    dataset = 'assist09'
+    # dataset = 'assist09'
+    dataset = 'assist17'
     print(f'start processing dataset {dataset}...')
     start = time.time()
     process(pool, dataset=dataset)
